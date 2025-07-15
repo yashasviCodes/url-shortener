@@ -1,6 +1,8 @@
 from flask import Flask
 import random
 import string
+import sqlite3 # The built-in Python library for SQLite
+
 # request: To access incoming data (like the long URL).
 # redirect: To send the user to another URL.
 # jsonify: To create a clean JSON response.
@@ -10,9 +12,27 @@ from flask import request, redirect, jsonify
 
 app = Flask(__name__) # creates instance of flask
 
-"""bringing the shortener_logic here"""
 
-url_database = {}
+# --- Database Setup ---
+
+def init_db() :
+    conn = sqlite3.connect('urls.db') # 'connect' will open the file 'urls.db' or create it if it's not there.
+
+    cursor = conn.cursor() # 'cursor'is an object that lets us send commands to the database
+    
+    cursor.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS urls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            short_code TEXT NOT NULL UNIQUE,
+            long_url TEXT NOT NULL
+        )
+        '''
+    )
+    conn.commit()
+    conn.close()
+
+
 
 def generate_short_code(length=6):
     characters = string.ascii_letters + string.digits
@@ -31,11 +51,25 @@ def shorten_api():
     
     # generate short code using the shortener logic
 
+    # connect to our database
+    conn = sqlite3.connect('urls.db')
+    cursor = conn.cursor()
+
     while True:
         short_code = generate_short_code()
-        if short_code not in url_database:
+    #     if short_code not in url_database:
+    #         break
+    # url_database[short_code] = long_url
+    # Query the DB to see if the code already exists
+
+        cursor.execute("SELECT short_code FROM urls WHERE short_code = ?", (short_code,))
+        if cursor.fetchone() is None: 
             break
-    url_database[short_code] = long_url
+    
+    # Now, INSERT the new URL mapping into the database
+    cursor.execute("INSERT INTO urls (short_code, long_url) VALUES (?, ?)", (short_code, long_url))
+    conn.commit()
+    conn.close()
 
     short_url = request.host_url + short_code
 
@@ -47,10 +81,22 @@ def shorten_api():
 
 @app.route('/<short_code>')
 def redirect_to_url(short_code) :
-    long_url = url_database.get(short_code)
+    conn = sqlite3.connect('urls.db')
+    cursor = conn.cursor()
+
+    # Find the long_url that corresponds to the short_code
+    # The '?' is a placeholder to prevent a security issue called SQL Injection.
+    cursor.execute("SELECT long_url FROM urls WHERE short_code = ?", (short_code,))
+
+    # .fetchone() gets the first result.
+    result = cursor.fetchone() 
+    conn.close()
 
 
-    if long_url:
+
+    if result:
+        # result will be a tuple, e.g., ('https://google.com',). We need the first item.
+        long_url = result[0]
         # If we found it, tell the browser to redirect to it.
         # The '302' is the HTTP status code for a temporary redirect.
         return redirect(long_url, code=302)
@@ -66,6 +112,7 @@ def home():
     return "Welcome to the URL Shortener! Use /shorten to create a URL."
 
 if __name__ == '__main__':
+    init_db()
     app.run(debug=True)
 
 
